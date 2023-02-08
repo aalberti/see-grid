@@ -27,8 +27,9 @@ class FxApp : Application() {
     private var camera: VideoCapture = VideoCapture(0)
 
     override fun start(primaryStage: Stage?) {
-        val imageView = ImageView()
-        val hbox = HBox(imageView)
+        val cameraView = ImageView()
+        val resultView = ImageView()
+        val hbox = HBox(cameraView, resultView)
         val scene = Scene(hbox)
         val stage = Stage()
         stage.setScene(scene)
@@ -36,51 +37,50 @@ class FxApp : Application() {
 
         object : AnimationTimer() {
             override fun handle(l: Long) {
-                imageView.setImage(facesFromCamera())
+                val camShot = captureCamera()
+                cameraView.setImage(camShot.showFaces().toFxImage())
             }
         }.start()
     }
 
-    private fun facesFromCamera(): Image {
+    private fun captureCamera(): Mat {
         val mat = Mat()
         camera.read(mat)
-        showFaces(mat)
-        return toImage(mat)
+        return mat
     }
+}
 
-    private fun toImage(mat: Mat): Image {
-        val bytes = MatOfByte()
-        Imgcodecs.imencode(".png", mat, bytes)
-        val inputStream = ByteArrayInputStream(bytes.toArray())
-        return Image(inputStream)
-    }
+private fun Mat.showFaces(): Mat {
+    return drawRectangles(detectFaces())
+}
 
-    private fun showFaces(picture: Mat) {
-        val facesDetected = detectFaces(picture)
-        drawFaces(facesDetected, picture)
-    }
+private fun Mat.detectFaces(): MatOfRect {
+    val cascadeClassifier = CascadeClassifier()
+    val minFaceSize = (this.rows() * 0.1f).roundToInt().toDouble()
+    cascadeClassifier.load("src/main/resources/haarcascade_frontalface_alt.xml")
+    val detectedFaces = MatOfRect()
+    cascadeClassifier.detectMultiScale(
+        this,
+        detectedFaces,
+        1.1,
+        3,
+        Objdetect.CASCADE_SCALE_IMAGE,
+        Size(minFaceSize, minFaceSize),
+        Size()
+    )
+    return detectedFaces
+}
 
-    private fun detectFaces(picture: Mat): MatOfRect {
-        val cascadeClassifier = CascadeClassifier()
-        val minFaceSize = (picture.rows() * 0.1f).roundToInt().toDouble()
-        cascadeClassifier.load("src/main/resources/haarcascade_frontalface_alt.xml")
-        val facesDetected = MatOfRect()
-        cascadeClassifier.detectMultiScale(
-            picture,
-            facesDetected,
-            1.1,
-            3,
-            Objdetect.CASCADE_SCALE_IMAGE,
-            Size(minFaceSize, minFaceSize),
-            Size()
-        )
-        return facesDetected
-    }
+private fun Mat.drawRectangles(rectangles: MatOfRect): Mat {
+    val enhanced = clone()
+    for (rectangle in rectangles.toArray())
+        Imgproc.rectangle(enhanced, rectangle.tl(), rectangle.br(), Scalar(0.0, 0.0, 255.0), 3)
+    return enhanced
+}
 
-    private fun drawFaces(facesDetected: MatOfRect, picture: Mat) {
-        val facesArray: Array<Rect> = facesDetected.toArray()
-        for (face in facesArray) {
-            Imgproc.rectangle(picture, face.tl(), face.br(), Scalar(0.0, 0.0, 255.0), 3)
-        }
-    }
+private fun Mat.toFxImage(): Image {
+    val bytes = MatOfByte()
+    Imgcodecs.imencode(".png", this, bytes)
+    val inputStream = ByteArrayInputStream(bytes.toArray())
+    return Image(inputStream)
 }
