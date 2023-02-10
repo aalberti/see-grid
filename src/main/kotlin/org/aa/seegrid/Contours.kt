@@ -29,11 +29,6 @@ internal class FindContours {
         return src
     }
 
-    private fun update(originalImage: Mat, threshold: Int, refresh: (Mat) -> Unit) {
-        val contours = contours(originalImage, threshold)
-        refresh(contours)
-    }
-
     private fun contours(originalImage: Mat, threshold: Int): Mat {
         val grayImage = Mat()
         Imgproc.cvtColor(originalImage, grayImage, Imgproc.COLOR_BGR2GRAY)
@@ -61,17 +56,20 @@ internal class FindContours {
 
         val frame = JFrame("Finding contours in your image demo")
         frame.defaultCloseOperation = JFrame.EXIT_ON_CLOSE
-        val onRefresh: (Mat) -> Unit = { contours ->
-            contoursLabel.icon = ImageIcon(HighGui.toBufferedImage(contours))
-            frame.repaint()
-        }
         val originalThreshold = 100
-        frame.contentPane.add(slider(originalThreshold) { threshold -> update(originalImage, threshold, onRefresh) }, BorderLayout.PAGE_START)
+        frame.contentPane.add(slider(originalThreshold) { threshold ->
+            refresh(contours(originalImage, threshold), contoursLabel, frame)
+        }, BorderLayout.PAGE_START)
         frame.contentPane.add(panel, BorderLayout.CENTER)
         frame.pack()
         frame.isVisible = true
 
-        update(originalImage, originalThreshold, onRefresh)
+        refresh(contours(originalImage, originalThreshold), contoursLabel, frame)
+    }
+
+    private fun refresh(contours: Mat, contoursLabel: JLabel, frame: JFrame) {
+        contoursLabel.icon = ImageIcon(HighGui.toBufferedImage(contours))
+        frame.repaint()
     }
 
     @Suppress("SameParameterValue")
