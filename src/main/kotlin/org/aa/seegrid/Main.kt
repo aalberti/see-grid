@@ -32,7 +32,7 @@ class FxApp : Application() {
         workingView.setImage(
             loadImage("src/main/resources/images/sudoku sample.jpg")
                 .toGrayScale()
-                .withContours()
+                .contours()
                 .toFxImage()
         )
 
@@ -113,7 +113,7 @@ private fun Mat.toGrayScale(): Mat =
         )
     }
 
-private fun Mat.withContours(): Mat =
+private fun Mat.contours(): Mat =
     transform{source, destination ->
         Canny(source, destination, 100.0, 200.0)
     }.transform { source, destination ->
