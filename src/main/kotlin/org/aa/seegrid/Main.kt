@@ -9,7 +9,6 @@ import javafx.scene.layout.HBox
 import javafx.stage.Stage
 import nu.pattern.OpenCV
 import org.opencv.core.*
-import org.opencv.core.CvType.CV_8UC3
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc.*
 import org.opencv.objdetect.CascadeClassifier
@@ -90,39 +89,26 @@ private fun Mat.detectFaces(): MatOfRect {
 private fun Mat.drawRectangles(rectangles: MatOfRect): Mat {
     val enhanced = clone()
     for (rectangle in rectangles.toArray())
-        rectangle(enhanced, rectangle.tl(), rectangle.br(), Scalar(0.0, 0.0, 255.0), 3)
+        rectangle(enhanced, rectangle.tl(), rectangle.br(), Scalar(255.0, 0.0, 255.0), 3)
     return enhanced
 }
 
 private fun Mat.toGrayScale(): Mat =
     transform { source, destination ->
-        cvtColor(
-            source,
-            destination,
-            COLOR_RGB2GRAY
-        )
-    }.transform { source, destination ->
-        adaptiveThreshold(
-            source,
-            destination,
-            255.0,
-            ADAPTIVE_THRESH_MEAN_C,
-            THRESH_BINARY,
-            31,
-            10.0
-        )
+        cvtColor(source, destination, COLOR_BGR2GRAY)
+        blur(destination, destination, Size(3.0, 3.0))
+        Canny(destination, destination, 40.0, 80.0)
     }
 
 private fun Mat.contours(): Mat =
-    transform{source, destination ->
-        Canny(source, destination, 100.0, 200.0)
-    }.transform { source, destination ->
-        val contours = ArrayList<MatOfPoint>()
-        findContours(source, contours, Mat(), RETR_TREE, CHAIN_APPROX_SIMPLE)
-        val drawing = Mat.zeros(destination.size(), CV_8UC3)
+    transform { source, destination ->
+        val contours: List<MatOfPoint> = ArrayList()
         val hierarchy = Mat()
-        for (i in 0 until contours.size)
-            drawContours(drawing, contours, i, Scalar(0.0, 0.0, 255.0), 2, LINE_8, hierarchy, 0, Point())
+        findContours(source, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE)
+        for (i in contours.indices) {
+            val color = Scalar(255.0, 0.0, 255.0)
+            drawContours(destination, contours, i, color, 2, LINE_8, hierarchy, 0, Point())
+        }
     }
 
 private fun Mat.transform(transformer: Mat.(Mat, Mat) -> Unit): Mat {
