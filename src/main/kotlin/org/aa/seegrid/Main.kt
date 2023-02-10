@@ -9,6 +9,7 @@ import javafx.scene.layout.HBox
 import javafx.stage.Stage
 import nu.pattern.OpenCV
 import org.opencv.core.*
+import org.opencv.core.CvType.CV_8UC3
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc.*
 import org.opencv.objdetect.CascadeClassifier
@@ -31,6 +32,7 @@ class FxApp : Application() {
         workingView.setImage(
             loadImage("src/main/resources/images/sudoku sample.jpg")
                 .toGrayScale()
+                .withContours()
                 .toFxImage()
         )
 
@@ -109,6 +111,18 @@ private fun Mat.toGrayScale(): Mat =
             31,
             10.0
         )
+    }
+
+private fun Mat.withContours(): Mat =
+    transform{source, destination ->
+        Canny(source, destination, 100.0, 200.0)
+    }.transform { source, destination ->
+        val contours = ArrayList<MatOfPoint>()
+        findContours(source, contours, Mat(), RETR_TREE, CHAIN_APPROX_SIMPLE)
+        val drawing = Mat.zeros(destination.size(), CV_8UC3)
+        val hierarchy = Mat()
+        for (i in 0 until contours.size)
+            drawContours(drawing, contours, i, Scalar(0.0, 0.0, 255.0), 2, LINE_8, hierarchy, 0, Point())
     }
 
 private fun Mat.transform(transformer: Mat.(Mat, Mat) -> Unit): Mat {
