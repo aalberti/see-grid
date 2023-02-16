@@ -4,8 +4,7 @@ import nu.pattern.OpenCV
 import org.opencv.core.*
 import org.opencv.highgui.HighGui
 import org.opencv.imgcodecs.Imgcodecs
-import org.opencv.imgproc.Imgproc
-import org.opencv.imgproc.Imgproc.LINE_8
+import org.opencv.imgproc.Imgproc.*
 import java.awt.BorderLayout
 import java.util.*
 import javax.swing.*
@@ -31,18 +30,21 @@ internal class FindContours {
 
     private fun contours(originalImage: Mat, threshold: Int): Mat {
         val grayImage = Mat()
-        Imgproc.cvtColor(originalImage, grayImage, Imgproc.COLOR_BGR2GRAY)
-        Imgproc.blur(grayImage, grayImage, Size(3.0, 3.0))
-        Imgproc.Canny(grayImage, grayImage, threshold.toDouble(), (threshold * 2).toDouble())
+        cvtColor(originalImage, grayImage, COLOR_BGR2GRAY)
+        blur(grayImage, grayImage, Size(3.0, 3.0))
+        Canny(grayImage, grayImage, threshold.toDouble(), (threshold * 2).toDouble())
         val contours: List<MatOfPoint> = ArrayList()
         val hierarchy = Mat()
-        Imgproc.findContours(grayImage, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE)
+        findContours(grayImage, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE)
 
         val contoursImage = Mat.zeros(grayImage.size(), CvType.CV_8UC3)
         for (i in contours.indices) {
             val color = Scalar(rng.nextInt(256).toDouble(), rng.nextInt(256).toDouble(), rng.nextInt(256).toDouble())
-            Imgproc.drawContours(contoursImage, contours, i, color, 2, LINE_8, hierarchy, 0, Point())
+            drawContours(contoursImage, contours, i, color, 2, LINE_8, hierarchy, 0, Point())
         }
+        val biggestContour = contours.maxBy { contourArea(it) }
+        val biggestRectangle = boundingRect(biggestContour)
+        rectangle(contoursImage, biggestRectangle, Scalar(255.0, 255.0, 255.0), 3, FILLED)
         return contoursImage
     }
 
