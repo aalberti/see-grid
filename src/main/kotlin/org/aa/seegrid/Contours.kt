@@ -14,8 +14,8 @@ internal class FindContours {
     private val rng = Random(12345)
 
     init {
-        val image = loadImage("src/main/resources/images/sudoku sample.jpg")
-        initUI(image)
+        val image = loadImage("src/main/resources/images/voisimage picture.jpg")
+        initUI(resize(image))
     }
 
     @Suppress("SameParameterValue")
@@ -46,6 +46,15 @@ internal class FindContours {
         val biggestRectangle = boundingRect(biggestContour)
         rectangle(contoursImage, biggestRectangle, Scalar(255.0, 255.0, 255.0), 3, FILLED)
         return contoursImage
+    }
+
+    private fun resize(originalImage: Mat): Mat {
+        val originalSize = originalImage.size()
+        val ratio: Int = if (originalSize.width > 600) (originalSize.width / 600).toInt() else 1
+        val size = Size(originalSize.width / ratio, originalSize.height / ratio)
+        val resized = Mat(size, originalImage.type())
+        resize(originalImage, resized, size)
+        return resized
     }
 
     private fun initUI(originalImage: Mat) {
