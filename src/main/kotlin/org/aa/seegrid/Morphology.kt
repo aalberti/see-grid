@@ -57,7 +57,7 @@ internal class Morphology {
 
         //! [horiz]
         // Specify size on horizontal axis
-        val horizontalSize = horizontal.cols() / 30
+        val horizontalSize = horizontal.cols() / 2
 
         // Create structure element for extracting horizontal lines through morphology operations
         val horizontalStructure = getStructuringElement(
@@ -77,7 +77,7 @@ internal class Morphology {
 
         //! [vert]
         // Specify size on vertical axis
-        val verticalSize = vertical.rows() / 30
+        val verticalSize = vertical.rows() / 2
 
         // Create structure element for extracting vertical lines through morphology operations
         val verticalStructure = getStructuringElement(MORPH_RECT, Size(1.0, verticalSize.toDouble()))
