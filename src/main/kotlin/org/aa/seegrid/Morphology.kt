@@ -14,7 +14,7 @@ import kotlin.system.exitProcess
 internal class Morphology {
     fun run() {
         // Load the image
-        val src = Imgcodecs.imread("src/main/resources/images/sudoku sample.jpg")
+        val src = Imgcodecs.imread("src/main/resources/images/voisimage droite.jpg")
 
         // Check if image is loaded fine
         if (src.empty()) {

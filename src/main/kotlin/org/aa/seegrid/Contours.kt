@@ -2,6 +2,8 @@ package org.aa.seegrid
 
 import nu.pattern.OpenCV
 import org.opencv.core.*
+import org.opencv.core.CvType.CV_32FC2
+import org.opencv.core.CvType.CV_32S
 import org.opencv.highgui.HighGui
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc.*
@@ -11,10 +13,8 @@ import javax.swing.*
 import kotlin.system.exitProcess
 
 internal class FindContours {
-    private val rng = Random(12345)
-
     init {
-        val image = loadImage("src/main/resources/images/voisimage picture.jpg")
+        val image = loadImage("src/main/resources/images/voisimage droite.jpg")
         initUI(resize(image))
     }
 
@@ -38,14 +38,27 @@ internal class FindContours {
         findContours(grayImage, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE)
 
         val contoursImage = Mat.zeros(grayImage.size(), CvType.CV_8UC3)
-        for (i in contours.indices) {
-            val color = Scalar(rng.nextInt(256).toDouble(), rng.nextInt(256).toDouble(), rng.nextInt(256).toDouble())
-            drawContours(contoursImage, contours, i, color, 2, LINE_8, hierarchy, 0, Point())
-        }
+        for (i in contours.indices)
+            drawContours(contoursImage, contours, i, Scalar(128.0, 128.0, 128.0), 1, LINE_8, hierarchy, 0, Point())
         val biggestContour = contours.maxBy { contourArea(it) }
-        val biggestRectangle = boundingRect(biggestContour)
-        rectangle(contoursImage, biggestRectangle, Scalar(255.0, 255.0, 255.0), 3, FILLED)
+        drawContours(contoursImage, listOf(biggestContour), -1, Scalar(255.0, 0.0, 0.0), 2)
+        val approximatedContour = approximate(biggestContour)
+        for (corner in approximatedContour.toList())
+            println("(${corner.x}, ${corner.y})")
+        drawContours(contoursImage, listOf(approximatedContour), -1, Scalar(255.0, 255.0, 255.0), 3)
         return contoursImage
+    }
+
+    private fun approximate(contour: MatOfPoint): MatOfPoint {
+        val contour2F = MatOfPoint2f()
+        contour.convertTo(contour2F, CV_32FC2)
+        val approximated2F = MatOfPoint2f()
+        val perimeter = arcLength(contour2F, true)
+        println("perimeter: $perimeter")
+        approxPolyDP(contour2F, approximated2F, 0.05 * perimeter, true)
+        val approximatedContour = MatOfPoint()
+        approximated2F.convertTo(approximatedContour, CV_32S)
+        return approximatedContour
     }
 
     private fun resize(originalImage: Mat): Mat {
