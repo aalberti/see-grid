@@ -23,15 +23,18 @@ class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
         val original = loadImage("src/main/resources/images/voisimage droite.jpg")
             .resize()
-        initView(original, { m -> m.toGrayScale() }, { m -> m.threshold() }, { m -> m.contours() })
+        initView(
+            original,
+            { m -> m.toGrayScale().threshold() },
+            { m -> m.contours() },
+        )
     }
 
     private fun initView(original: Mat, vararg operators: (Mat) -> Mat) {
         val pane = FlowPane()
-        pane.prefWrapLength = 1500.0
-        pane.children.add(original.toFxImage().toImageView())
-        val nextImages = operators.runningFoldIndexed(original) { _, previous, operator -> operator(previous) }
-        pane.children.addAll(nextImages.map { it.toFxImage().toImageView() })
+        pane.prefWrapLength = 1900.0
+        val images = operators.runningFoldIndexed(original) { _, previous, operator -> operator(previous) }
+        pane.children.addAll(images.map { it.toFxImage().toImageView() })
 
         val stage = Stage()
         stage.scene = Scene(pane)
@@ -44,13 +47,14 @@ class FxApp : Application() {
         return imageView
     }
 
-    private fun loadImage(imagePath: String): Mat {
+    private fun loadImage(@Suppress("SameParameterValue") imagePath: String): Mat {
         return Imgcodecs.imread(imagePath)
     }
 }
 
 private fun Mat.resize(): Mat {
-    val ratio: Int = if (size().width > 600) (size().width / 600).toInt() else 1
+    val maxWidth = 700
+    val ratio: Int = if (size().width > maxWidth) (size().width / maxWidth).toInt() else 1
     val size = Size(size().width / ratio, size().height / ratio)
     val resized = Mat(size, type())
     resize(this, resized, size)
@@ -84,7 +88,22 @@ private fun Mat.contours(): Mat {
     val destination = Mat.zeros(size(), CV_8UC3)
     for (i in contours.indices)
         drawContours(destination, contours, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, hierarchy, 0, Point())
+    val biggestContour = contours.maxBy { contourArea(it) }
+    drawContours(destination, listOf(biggestContour), -1, Scalar(255.0, 0.0, 0.0), 2)
+    val approximatedContour = approximate(biggestContour)
+    drawContours(destination, listOf(approximatedContour), -1, Scalar(255.0, 255.0, 255.0), 3)
     return destination
+}
+
+private fun approximate(contour: MatOfPoint): MatOfPoint {
+    val contour2F = MatOfPoint2f()
+    contour.convertTo(contour2F, CvType.CV_32FC2)
+    val approximated2F = MatOfPoint2f()
+    val perimeter = arcLength(contour2F, true)
+    approxPolyDP(contour2F, approximated2F, 0.05 * perimeter, true)
+    val approximatedContour = MatOfPoint()
+    approximated2F.convertTo(approximatedContour, CvType.CV_32S)
+    return approximatedContour
 }
 
 private fun Mat.toFxImage(): Image {
