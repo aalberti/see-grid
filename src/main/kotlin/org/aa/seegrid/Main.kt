@@ -23,17 +23,16 @@ class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
         val original = loadImage("src/main/resources/images/voisimage droite.jpg")
             .resize()
-        initView(
-            original,
-            { m -> m.toGrayScale().threshold() },
-            { m -> m.contours() },
-        )
+        val threshold = original.toGrayScale().threshold()
+        val (imageWithContours, contours) = threshold.contours()
+        val (imageWithBiggestContour, biggestContour) = imageWithContours.biggestContour(contours)
+        val imageWithTrapezoid = original.trapezoidContour(biggestContour).image
+        initView(original, threshold, imageWithBiggestContour, imageWithTrapezoid)
     }
 
-    private fun initView(original: Mat, vararg operators: (Mat) -> Mat) {
+    private fun initView(vararg images: Mat) {
         val pane = FlowPane()
         pane.prefWrapLength = 1900.0
-        val images = operators.runningFoldIndexed(original) { _, previous, operator -> operator(previous) }
         pane.children.addAll(images.map { it.toFxImage().toImageView() })
 
         val stage = Stage()
@@ -81,18 +80,30 @@ private fun Mat.threshold(): Mat {
     return destination
 }
 
-private fun Mat.contours(): Mat {
+private fun Mat.contours(): Contours {
     val contours: List<MatOfPoint> = ArrayList()
     val hierarchy = Mat()
     findContours(this, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE)
     val destination = Mat.zeros(size(), CV_8UC3)
     for (i in contours.indices)
         drawContours(destination, contours, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, hierarchy, 0, Point())
+    return Contours(destination, contours)
+}
+
+private fun Mat.biggestContour(contours: List<MatOfPoint>): Contour {
+    val destination = Mat.zeros(size(), CV_8UC3)
+    copyTo(destination)
     val biggestContour = contours.maxBy { contourArea(it) }
     drawContours(destination, listOf(biggestContour), -1, Scalar(255.0, 0.0, 0.0), 2)
+    return Contour(destination, biggestContour)
+}
+
+private fun Mat.trapezoidContour(biggestContour: MatOfPoint): Contour {
+    val destination = Mat.zeros(size(), CV_8UC3)
+    copyTo(destination)
     val approximatedContour = approximate(biggestContour)
     drawContours(destination, listOf(approximatedContour), -1, Scalar(255.0, 255.0, 255.0), 3)
-    return destination
+    return Contour(destination, approximatedContour)
 }
 
 private fun approximate(contour: MatOfPoint): MatOfPoint {
@@ -105,6 +116,10 @@ private fun approximate(contour: MatOfPoint): MatOfPoint {
     approximated2F.convertTo(approximatedContour, CvType.CV_32S)
     return approximatedContour
 }
+
+data class Contours(val image: Mat, val contours: List<MatOfPoint>)
+
+data class Contour(val image: Mat, val contour: MatOfPoint)
 
 private fun Mat.toFxImage(): Image {
     val bytes = MatOfByte()
