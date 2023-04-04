@@ -2,6 +2,7 @@ package org.aa.seegrid
 
 import javafx.application.Application
 import javafx.scene.Scene
+import javafx.scene.control.ScrollPane
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
 import javafx.scene.layout.FlowPane
@@ -25,11 +26,13 @@ class FxApp : Application() {
             .resize()
         val threshold = original.toGrayScale().threshold()
         val (imageWithContours, contours) = threshold.contours()
-        val (imageWithBiggestContour, biggestContour) = imageWithContours.biggestContour(contours)
+        val (_, biggestContour) = imageWithContours.biggestContour(contours)
         val trapezoidContour = original.trapezoidContour(biggestContour)
-        val imageWithTrapezoid = trapezoidContour.image
         val deskewedImage = original.toRectangle(trapezoidContour.contour)
-        initView(original, imageWithBiggestContour, imageWithTrapezoid, deskewedImage)
+        val verticals = deskewedImage.toGrayScale().threshold().verticalLines().contours().image
+        val horizontals = deskewedImage.toGrayScale().threshold().horizontalLines().contours().image
+
+        initView(original, deskewedImage, verticals, horizontals)
     }
 
     private fun initView(vararg images: Mat) {
@@ -38,7 +41,7 @@ class FxApp : Application() {
         pane.children.addAll(images.map { it.toFxImage().toImageView() })
 
         val stage = Stage()
-        stage.scene = Scene(pane)
+        stage.scene = Scene(ScrollPane(pane))
         stage.show()
     }
 
@@ -135,6 +138,27 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
     val destination = Mat(size(), type())
     copyTo(destination)
     warpPerspective(this, destination, transform, destination.size())
+    return destination
+}
+
+private fun Mat.verticalLines():Mat {
+    val verticalSize: Int = rows() / 20
+    val structureSize = Size(1.0, verticalSize.toDouble())
+
+    return structure(structureSize)
+}
+private fun Mat.horizontalLines():Mat {
+    val horizontalSize: Int = cols() / 20
+    val structureSize = Size(horizontalSize.toDouble(), 1.0)
+
+    return structure(structureSize)
+}
+
+private fun Mat.structure(structureSize: Size): Mat {
+    val destination = clone()
+    val structure = getStructuringElement(MORPH_RECT, structureSize)
+    erode(destination, destination, structure, Point(-1.0, -1.0))
+    dilate(destination, destination, structure, Point(-1.0, -1.0))
     return destination
 }
 
