@@ -8,7 +8,7 @@ import javafx.scene.layout.FlowPane
 import javafx.stage.Stage
 import nu.pattern.OpenCV
 import org.opencv.core.*
-import org.opencv.core.CvType.CV_8UC3
+import org.opencv.core.CvType.*
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc.*
 import java.io.ByteArrayInputStream
@@ -26,8 +26,10 @@ class FxApp : Application() {
         val threshold = original.toGrayScale().threshold()
         val (imageWithContours, contours) = threshold.contours()
         val (imageWithBiggestContour, biggestContour) = imageWithContours.biggestContour(contours)
-        val imageWithTrapezoid = original.trapezoidContour(biggestContour).image
-        initView(original, threshold, imageWithBiggestContour, imageWithTrapezoid)
+        val trapezoidContour = original.trapezoidContour(biggestContour)
+        val imageWithTrapezoid = trapezoidContour.image
+        val deskewedImage = original.toRectangle(trapezoidContour.contour)
+        initView(original, imageWithBiggestContour, imageWithTrapezoid, deskewedImage)
     }
 
     private fun initView(vararg images: Mat) {
@@ -38,6 +40,13 @@ class FxApp : Application() {
         val stage = Stage()
         stage.scene = Scene(pane)
         stage.show()
+    }
+
+    private fun Mat.toFxImage(): Image {
+        val bytes = MatOfByte()
+        Imgcodecs.imencode(".png", this, bytes)
+        val inputStream = ByteArrayInputStream(bytes.toArray())
+        return Image(inputStream)
     }
 
     private fun Image.toImageView(): ImageView {
@@ -64,12 +73,6 @@ private fun Mat.toGrayScale(): Mat {
     val destination = Mat(rows(), cols(), type())
     cvtColor(this, destination, COLOR_BGR2GRAY)
     blur(destination, destination, Size(2.0, 2.0))
-    return destination
-}
-
-private fun Mat.canny(): Mat {
-    val destination = Mat(rows(), cols(), type())
-    Canny(this, destination, 40.0, 80.0)
     return destination
 }
 
@@ -108,12 +111,12 @@ private fun Mat.trapezoidContour(biggestContour: MatOfPoint): Contour {
 
 private fun approximate(contour: MatOfPoint): MatOfPoint {
     val contour2F = MatOfPoint2f()
-    contour.convertTo(contour2F, CvType.CV_32FC2)
+    contour.convertTo(contour2F, CV_32FC2)
     val approximated2F = MatOfPoint2f()
     val perimeter = arcLength(contour2F, true)
     approxPolyDP(contour2F, approximated2F, 0.05 * perimeter, true)
     val approximatedContour = MatOfPoint()
-    approximated2F.convertTo(approximatedContour, CvType.CV_32S)
+    approximated2F.convertTo(approximatedContour, CV_32S)
     return approximatedContour
 }
 
@@ -121,9 +124,22 @@ data class Contours(val image: Mat, val contours: List<MatOfPoint>)
 
 data class Contour(val image: Mat, val contour: MatOfPoint)
 
-private fun Mat.toFxImage(): Image {
-    val bytes = MatOfByte()
-    Imgcodecs.imencode(".png", this, bytes)
-    val inputStream = ByteArrayInputStream(bytes.toArray())
-    return Image(inputStream)
+private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
+    val rectangle = MatOfPoint(
+        Point(10.0, 10.0),
+        Point(10.0, rows().toDouble() - 10.0),
+        Point(cols().toDouble() - 10.0, rows().toDouble() - 10.0),
+        Point(cols().toDouble() - 10.0, 10.0)
+    )
+    val transform = getPerspectiveTransform(trapezoid.to2f(), rectangle.to2f())
+    val destination = Mat(size(), type())
+    copyTo(destination)
+    warpPerspective(this, destination, transform, destination.size())
+    return destination
+}
+
+private fun MatOfPoint.to2f(): MatOfPoint2f {
+    val destination = MatOfPoint2f()
+    convertTo(destination, CV_32F)
+    return destination
 }
