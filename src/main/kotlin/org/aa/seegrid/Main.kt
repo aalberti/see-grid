@@ -24,15 +24,17 @@ class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
         val original = loadImage("src/main/resources/images/voisimage droite.jpg")
             .resize()
-        val threshold = original.toGrayScale().threshold()
-        val (imageWithContours, contours) = threshold.contours()
+        val (imageWithContours, contours) = original.toGrayScale().threshold().contours()
         val (_, biggestContour) = imageWithContours.biggestContour(contours)
         val trapezoidContour = original.trapezoidContour(biggestContour)
         val deskewedImage = original.toRectangle(trapezoidContour.contour)
-        val verticals = deskewedImage.toGrayScale().threshold().verticalLines().contours().image
-        val horizontals = deskewedImage.toGrayScale().threshold().horizontalLines().contours().image
+        val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
+        val deskewedContours = cleanedUpDeskewed.contours().image
+        val verticals = cleanedUpDeskewed.verticalLines().contours().image
+        val horizontals = cleanedUpDeskewed.horizontalLines().contours().image
+        val numbers = cleanedUpDeskewed.numbers()
 
-        initView(original, deskewedImage, verticals, horizontals)
+        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals)
     }
 
     private fun initView(vararg images: Mat) {
@@ -42,6 +44,8 @@ class FxApp : Application() {
 
         val stage = Stage()
         stage.scene = Scene(ScrollPane(pane))
+        stage.width = 1900.0
+        stage.height = 1000.0
         stage.show()
     }
 
@@ -134,20 +138,21 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
         Point(cols().toDouble() - 10.0, rows().toDouble() - 10.0),
         Point(cols().toDouble() - 10.0, 10.0)
     )
-    val transform = getPerspectiveTransform(trapezoid.to2f(), rectangle.to2f())
+    val transform = getPerspectiveTransform(trapezoid.toFloats(), rectangle.toFloats())
     val destination = Mat(size(), type())
     copyTo(destination)
     warpPerspective(this, destination, transform, destination.size())
     return destination
 }
 
-private fun Mat.verticalLines():Mat {
+private fun Mat.verticalLines(): Mat {
     val verticalSize: Int = rows() / 20
     val structureSize = Size(1.0, verticalSize.toDouble())
 
     return structure(structureSize)
 }
-private fun Mat.horizontalLines():Mat {
+
+private fun Mat.horizontalLines(): Mat {
     val horizontalSize: Int = cols() / 20
     val structureSize = Size(horizontalSize.toDouble(), 1.0)
 
@@ -162,8 +167,27 @@ private fun Mat.structure(structureSize: Size): Mat {
     return destination
 }
 
-private fun MatOfPoint.to2f(): MatOfPoint2f {
+private fun MatOfPoint.toFloats(): MatOfPoint2f {
     val destination = MatOfPoint2f()
     convertTo(destination, CV_32F)
+    return destination
+}
+
+private fun MatOfPoint2f.toInts(): MatOfPoint {
+    val destination = MatOfPoint()
+    convertTo(destination, CV_32S)
+    return destination
+}
+
+private fun Mat.numbers(): Mat {
+    val numbers = contours().contours
+        .map { it.toFloats() }
+        .filter {
+            val boundingRect = minAreaRect(it).boundingRect()
+            boundingRect.width in 4..20 && boundingRect.height in 12..20
+        }.map { it.toInts() }
+    val destination = Mat.zeros(size(), CV_8UC3)
+    for (i in numbers.indices)
+        drawContours(destination, numbers, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, Mat(), 0, Point())
     return destination
 }
