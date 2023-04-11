@@ -39,7 +39,7 @@ class FxApp : Application() {
         val deskewedContours = cleanedUpDeskewed.contours().image
         val verticals = cleanedUpDeskewed.verticalLines().contours().image
         val horizontals = cleanedUpDeskewed.horizontalLines().contours().image
-        val numbers = cleanedUpDeskewed.numbers()
+        val numbers = cleanedUpDeskewed.numberCandidates()
 
         trainModel()
         initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals)
@@ -190,7 +190,7 @@ private fun MatOfPoint2f.toInts(): MatOfPoint {
     return destination
 }
 
-private fun Mat.numbers(): Mat {
+private fun Mat.numberCandidates(): Mat {
     val numbers = contours().contours
         .map { it.toFloats() }
         .filter {
@@ -208,24 +208,40 @@ private fun trainModel() {
         .filter { it.extension == "png" }
         .map { Pair(it.parent.fileName.toString().toInt(), it) }
         .toList()
+        .shuffled()
+    val (trainingLabeledImages, testLabeledImages) = labeledImages.chunked(labeledImages.size * 9 / 10)
+    val (trainingFeatures, trainingLabels) = mlData(trainingLabeledImages)
+
+    val knn = KNearest.create()
+    knn.defaultK = 5
+    knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
+
+    val (testFeatures, testLabels) = mlData(testLabeledImages)
+    for (i in 0 until testFeatures.rows()) {
+        val nearest = knn.findNearest(testFeatures.row(i), 5, Mat()).toDouble()
+        val expected = testLabels.get(i, 0)[0]
+        println("${if (nearest == expected) "o" else "x"} got $nearest expected $expected")
+    }
+}
+
+private fun mlData(labeledImages: List<Pair<Int, Path>>): Pair<Mat, Mat> {
     val images = labeledImages.asSequence()
         .map { it.second }
         .map { loadImage(it.toString()) }
         .map { it.resize(20.0, 20.0) }
         .map { it.toGrayScale() }
         .toList()
-    val samples = images.toFeatures()
-    val labels = vector_int_to_Mat(labeledImages
+    val features = images.toFeatures()
+    val labels = vector_int_to_Mat(
+        labeledImages
         .map { it.first }
         .toList()
     ).toFloats()
-
-    val knn = KNearest.create()
-    knn.train(samples, ROW_SAMPLE, labels)
+    return Pair(features, labels)
 }
 
 private fun List<Mat>.toFeatures(): Mat {
-    val result = Mat(0, this.first().hogFeatures().cols(), CV_32F)
+    val result = Mat()
     this
         .map { it.hogFeatures() }
         .forEach { result.push_back(it) }
