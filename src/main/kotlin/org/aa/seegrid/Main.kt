@@ -12,7 +12,14 @@ import org.opencv.core.*
 import org.opencv.core.CvType.*
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc.*
+import org.opencv.ml.KNearest
+import org.opencv.ml.Ml.ROW_SAMPLE
+import org.opencv.objdetect.HOGDescriptor
+import org.opencv.utils.Converters.*
 import java.io.ByteArrayInputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.extension
 
 
 fun main() {
@@ -23,7 +30,7 @@ fun main() {
 class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
         val original = loadImage("src/main/resources/images/voisimage droite.jpg")
-            .resize()
+            .resize(700)
         val (imageWithContours, contours) = original.toGrayScale().threshold().contours()
         val (_, biggestContour) = imageWithContours.biggestContour(contours)
         val trapezoidContour = original.trapezoidContour(biggestContour)
@@ -34,6 +41,7 @@ class FxApp : Application() {
         val horizontals = cleanedUpDeskewed.horizontalLines().contours().image
         val numbers = cleanedUpDeskewed.numbers()
 
+        trainModel()
         initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals)
     }
 
@@ -61,16 +69,19 @@ class FxApp : Application() {
         imageView.image = this
         return imageView
     }
-
-    private fun loadImage(@Suppress("SameParameterValue") imagePath: String): Mat {
-        return Imgcodecs.imread(imagePath)
-    }
 }
 
-private fun Mat.resize(): Mat {
-    val maxWidth = 700
+private fun loadImage(@Suppress("SameParameterValue") imagePath: String): Mat {
+    return Imgcodecs.imread(imagePath)
+}
+
+private fun Mat.resize(maxWidth: Int): Mat {
     val ratio: Int = if (size().width > maxWidth) (size().width / maxWidth).toInt() else 1
-    val size = Size(size().width / ratio, size().height / ratio)
+    return resize(size().width / ratio, size().height / ratio)
+}
+
+private fun Mat.resize(width: Double, height: Double): Mat {
+    val size = Size(width, height)
     val resized = Mat(size, type())
     resize(this, resized, size)
     return resized
@@ -189,5 +200,60 @@ private fun Mat.numbers(): Mat {
     val destination = Mat.zeros(size(), CV_8UC3)
     for (i in numbers.indices)
         drawContours(destination, numbers, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, Mat(), 0, Point())
+    return destination
+}
+
+private fun trainModel() {
+    val labeledImages = Files.walk(Path.of("C:\\Users\\Antoine Alberti\\Pictures\\numbers"))
+        .filter { it.extension == "png" }
+        .map { Pair(it.parent.fileName.toString().toInt(), it) }
+        .toList()
+    val images = labeledImages.asSequence()
+        .map { it.second }
+        .map { loadImage(it.toString()) }
+        .map { it.resize(20.0, 20.0) }
+        .map { it.toGrayScale() }
+        .toList()
+    val samples = images.toFeatures()
+    val labels = vector_int_to_Mat(labeledImages
+        .map { it.first }
+        .toList()
+    ).toFloats()
+
+    val knn = KNearest.create()
+    knn.train(samples, ROW_SAMPLE, labels)
+}
+
+private fun List<Mat>.toFeatures(): Mat {
+    val result = Mat(0, this.first().hogFeatures().cols(), CV_32F)
+    this
+        .map { it.hogFeatures() }
+        .forEach { result.push_back(it) }
+    return result
+}
+
+private fun Mat.hogFeatures(): Mat {
+    val hog = HOGDescriptor(
+        Size(20.0, 20.0),
+        Size(10.0, 10.0),
+        Size(5.0, 5.0),
+        Size(5.0, 5.0),
+        9
+    )
+
+    val descriptor = MatOfFloat()
+    hog.compute(this, descriptor)
+    return descriptor.columnToRow()
+}
+
+private fun Mat.columnToRow():Mat {
+    val result = Mat(1, rows(), type())
+    for (i in 0 until rows()) result.put(0, i, get(i, 0)[0])
+    return result
+}
+
+private fun Mat.toFloats(): Mat {
+    val destination = Mat(rows(), cols(), CV_32F)
+    convertTo(destination, CV_32F)
     return destination
 }
