@@ -204,7 +204,7 @@ private fun Mat.numberCandidates(): Contours {
 }
 
 private fun trainModel() {
-    val labeledImages = Files.walk(Path.of("C:\\Users\\Antoine Alberti\\Pictures\\numbers"))
+    val labeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
         .filter { it.extension == "png" }
         .map { Pair(it.parent.fileName.toString().toInt(), it) }
         .toList()
