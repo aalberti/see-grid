@@ -39,13 +39,14 @@ class FxApp : Application() {
         val deskewedImage = original.toRectangle(trapezoidContour.contour)
         val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
         val deskewedContours = cleanedUpDeskewed.contours().image
-        val verticals = cleanedUpDeskewed.verticalLines().contours().image
-        val (horizontals, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
+        val (_, verticalContours) = cleanedUpDeskewed.verticalLines().contours()
+        val (_, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
         val (numbers, _) = cleanedUpDeskewed.numberCandidates()
-        val horizontalLines = numbers.toHorizontalLines(horizontalContours)
+        val horizontalLines = numbers.withHorizontalLines(horizontalContours)
+        val grid = horizontalLines.withVerticalLines(verticalContours)
 
         trainModel()
-        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals, horizontalLines)
+        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, grid)
     }
 
     private fun initView(vararg images: Mat) {
@@ -173,23 +174,46 @@ private fun Mat.horizontalLines(): Mat {
     return structure(structureSize)
 }
 
-private fun Mat.toHorizontalLines(horizontalContours: List<MatOfPoint>): Mat {
+private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Mat {
     val lines: List<Pair<Point, Point>> = horizontalContours
         .map { boundingRect(it) }
         .sortedBy { it.y }
         .fold(listOf()) { acc: List<Rect>, r: Rect ->
             when {
                 acc.isEmpty() -> listOf(r)
-                acc.last().isSameLineAs(r) -> acc.dropLast(1) + union(acc.last(), r)
+                acc.last().isSameHorizontalLineAs(r) -> acc.dropLast(1) + union(acc.last(), r)
                 else -> acc + r
             }
         }
         .map { Pair(Point(it.left().toDouble(), it.center().y), Point(it.right().toDouble(), it.center().y)) }
+    return withLines(lines)
+}
+
+private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Mat {
+    val lines: List<Pair<Point, Point>> = verticalContours
+        .map { boundingRect(it) }
+        .sortedBy { it.x }
+        .fold(listOf()) { acc: List<Rect>, r: Rect ->
+            when {
+                acc.isEmpty() -> listOf(r)
+                acc.last().isSameVerticalLineAs(r) -> acc.dropLast(1) + union(acc.last(), r)
+                else -> acc + r
+            }
+        }
+        .map { Pair(Point(it.center().x, it.top().toDouble()), Point(it.center().x, it.bottom().toDouble())) }
+    return withLines(lines)
+}
+
+private fun Rect.isSameHorizontalLineAs(other: Rect) = center().isVerticallyBoundBy(other)
+private fun Point.isVerticallyBoundBy(rectangle: Rect) = y >= rectangle.y - 5 && y <= rectangle.y + rectangle.height + 5
+
+private fun Rect.isSameVerticalLineAs(other: Rect) = center().isHorizontallyBoundBy(other)
+private fun Point.isHorizontallyBoundBy(rectangle: Rect) = x >= rectangle.x - 5 && x <= rectangle.x + rectangle.width + 5
+
+private fun Mat.withLines(lines: List<Pair<Point, Point>>): Mat {
     val result = Mat()
     copyTo(result)
-    for (line in lines) {
-        line(result, line.first, line.second, Scalar(255.0, 0.0, 0.0))
-    }
+    for (line in lines) line(result, line.first, line.second, Scalar(255.0, 0.0, 0.0))
     return result
 }
 
@@ -203,11 +227,6 @@ private fun Rect.left() = x
 private fun Rect.right() = x + width
 private fun Rect.top() = y
 private fun Rect.bottom() = y + height
-
-private fun Rect.isSameLineAs(other: Rect) = center().isVerticallyBoundBy(other)
-
-private fun Point.isVerticallyBoundBy(rectangle: Rect) = y >= rectangle.y && y <= rectangle.y + rectangle.height
-
 fun Rect.center() = Point(x + width.toDouble().div(2), y + height.toDouble().div(2))
 
 
