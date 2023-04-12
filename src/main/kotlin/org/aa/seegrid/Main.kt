@@ -216,15 +216,15 @@ private fun trainModel() {
     knn.defaultK = 5
     knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
 
-    val (testFeatures, testLabels) = mlData(testLabeledImages)
+    val (testFeatures, testLabels, testImagePaths) = mlData(testLabeledImages)
     for (i in 0 until testFeatures.rows()) {
         val nearest = knn.findNearest(testFeatures.row(i), 5, Mat()).toDouble()
         val expected = testLabels.get(i, 0)[0]
-        println("${if (nearest == expected) "o" else "x"} got $nearest expected $expected")
+        println("${if (nearest == expected) "-" else "X"} got $nearest expected $expected for ${testImagePaths[i]}")
     }
 }
 
-private fun mlData(labeledImages: List<Pair<Int, Path>>): Pair<Mat, Mat> {
+private fun mlData(labeledImages: List<Pair<Int, Path>>): Triple<Mat, Mat, List<Path>> {
     val images = labeledImages.asSequence()
         .map { it.second }
         .map { loadImage(it.toString()) }
@@ -237,7 +237,7 @@ private fun mlData(labeledImages: List<Pair<Int, Path>>): Pair<Mat, Mat> {
         .map { it.first }
         .toList()
     ).toFloats()
-    return Pair(features, labels)
+    return Triple(features, labels, labeledImages.map { it.second })
 }
 
 private fun List<Mat>.toFeatures(): Mat {
