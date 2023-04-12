@@ -41,12 +41,13 @@ class FxApp : Application() {
         val deskewedContours = cleanedUpDeskewed.contours().image
         val (_, verticalContours) = cleanedUpDeskewed.verticalLines().contours()
         val (_, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
-        val (numbers, _) = cleanedUpDeskewed.numberCandidates()
-        val horizontalLines = numbers.withHorizontalLines(horizontalContours)
-        val grid = horizontalLines.withVerticalLines(verticalContours)
+        val (numbersImage, numberCandidates) = cleanedUpDeskewed.numberCandidates()
+        val (horizontalLinesImage, horizontalLines) = numbersImage.withHorizontalLines(horizontalContours)
+        val (gridImage, verticalLines) = horizontalLinesImage.withVerticalLines(verticalContours)
+        val imageWithCoordinates = gridImage.withContoursCoordinates(numberCandidates, horizontalLines, verticalLines)
 
         trainModel()
-        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, grid)
+        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, imageWithCoordinates)
     }
 
     private fun initView(vararg images: Mat) {
@@ -73,6 +74,52 @@ class FxApp : Application() {
         imageView.image = this
         return imageView
     }
+}
+
+private fun Mat.withContoursCoordinates(
+    contours: List<MatOfPoint>,
+    horizontalLines: List<Pair<Point, Point>>,
+    verticalLines: List<Pair<Point, Point>>
+): Mat {
+    val copy = copy()
+    contours
+        .map { boundingRect(it) }
+        .map { PositionedRectangle(column(it, verticalLines), row(it, horizontalLines), it) }
+        .forEach {
+            putText(
+                copy,
+                "(${it.row}, ${it.column})",
+                Point(it.rectangle.x.toDouble(), (it.rectangle.y - 10).toDouble()),
+                FONT_HERSHEY_SIMPLEX,
+                0.4,
+                Scalar(0.0, 0.0, 255.0)
+            )
+        }
+    return copy
+}
+
+private fun Mat.copy(): Mat {
+    val result = Mat()
+    copyTo(result)
+    return result
+}
+
+class PositionedRectangle(val column: Int, val row: Int, val rectangle: Rect)
+
+fun column(rectangle: Rect, verticalLines: List<Pair<Point, Point>>): Int {
+    for (i in 0 until verticalLines.size - 1) {
+        if (rectangle.center().x in verticalLines[i].first.x..verticalLines[i + 1].first.x)
+            return i
+    }
+    return -1
+}
+
+fun row(rectangle: Rect, horizontalLines: List<Pair<Point, Point>>): Int {
+    for (i in 0 until horizontalLines.size - 1) {
+        if (rectangle.center().y in horizontalLines[i].first.y..horizontalLines[i + 1].first.y)
+            return i
+    }
+    return -1
 }
 
 private fun loadImage(@Suppress("SameParameterValue") imagePath: String): Mat {
@@ -116,16 +163,14 @@ private fun Mat.contours(): Contours {
 }
 
 private fun Mat.biggestContour(contours: List<MatOfPoint>): Contour {
-    val destination = Mat.zeros(size(), CV_8UC3)
-    copyTo(destination)
+    val destination = copy()
     val biggestContour = contours.maxBy { contourArea(it) }
     drawContours(destination, listOf(biggestContour), -1, Scalar(255.0, 0.0, 0.0), 2)
     return Contour(destination, biggestContour)
 }
 
 private fun Mat.trapezoidContour(biggestContour: MatOfPoint): Contour {
-    val destination = Mat.zeros(size(), CV_8UC3)
-    copyTo(destination)
+    val destination = copy()
     val approximatedContour = approximate(biggestContour)
     drawContours(destination, listOf(approximatedContour), -1, Scalar(255.0, 255.0, 255.0), 3)
     return Contour(destination, approximatedContour)
@@ -154,8 +199,7 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
         Point(cols().toDouble() - 10.0, 10.0)
     )
     val transform = getPerspectiveTransform(trapezoid.toFloats(), rectangle.toFloats())
-    val destination = Mat(size(), type())
-    copyTo(destination)
+    val destination = copy()
     warpPerspective(this, destination, transform, destination.size())
     return destination
 }
@@ -174,7 +218,7 @@ private fun Mat.horizontalLines(): Mat {
     return structure(structureSize)
 }
 
-private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Mat {
+private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Lines {
     val lines: List<Pair<Point, Point>> = horizontalContours
         .map { boundingRect(it) }
         .sortedBy { it.y }
@@ -186,10 +230,10 @@ private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Mat {
             }
         }
         .map { Pair(Point(it.left().toDouble(), it.center().y), Point(it.right().toDouble(), it.center().y)) }
-    return withLines(lines)
+    return Lines(withLines(lines), lines)
 }
 
-private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Mat {
+private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Lines {
     val lines: List<Pair<Point, Point>> = verticalContours
         .map { boundingRect(it) }
         .sortedBy { it.x }
@@ -201,18 +245,18 @@ private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Mat {
             }
         }
         .map { Pair(Point(it.center().x, it.top().toDouble()), Point(it.center().x, it.bottom().toDouble())) }
-    return withLines(lines)
+    return Lines(withLines(lines), lines)
 }
 
 private fun Rect.isSameHorizontalLineAs(other: Rect) = center().isVerticallyBoundBy(other)
 private fun Point.isVerticallyBoundBy(rectangle: Rect) = y >= rectangle.y - 5 && y <= rectangle.y + rectangle.height + 5
 
 private fun Rect.isSameVerticalLineAs(other: Rect) = center().isHorizontallyBoundBy(other)
-private fun Point.isHorizontallyBoundBy(rectangle: Rect) = x >= rectangle.x - 5 && x <= rectangle.x + rectangle.width + 5
+private fun Point.isHorizontallyBoundBy(rectangle: Rect) =
+    x >= rectangle.x - 5 && x <= rectangle.x + rectangle.width + 5
 
 private fun Mat.withLines(lines: List<Pair<Point, Point>>): Mat {
-    val result = Mat()
-    copyTo(result)
+    val result = copy()
     for (line in lines) line(result, line.first, line.second, Scalar(255.0, 0.0, 0.0))
     return result
 }
@@ -229,6 +273,7 @@ private fun Rect.top() = y
 private fun Rect.bottom() = y + height
 fun Rect.center() = Point(x + width.toDouble().div(2), y + height.toDouble().div(2))
 
+private data class Lines(val image: Mat, val lines: List<Pair<Point, Point>>)
 
 private fun Mat.structure(structureSize: Size): Mat {
     val destination = clone()
