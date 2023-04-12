@@ -17,9 +17,11 @@ import org.opencv.ml.Ml.ROW_SAMPLE
 import org.opencv.objdetect.HOGDescriptor
 import org.opencv.utils.Converters.*
 import java.io.ByteArrayInputStream
+import java.lang.Integer.max
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.extension
+import kotlin.math.min
 
 
 fun main() {
@@ -38,11 +40,12 @@ class FxApp : Application() {
         val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
         val deskewedContours = cleanedUpDeskewed.contours().image
         val verticals = cleanedUpDeskewed.verticalLines().contours().image
-        val horizontals = cleanedUpDeskewed.horizontalLines().contours().image
+        val (horizontals, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
         val (numbers, _) = cleanedUpDeskewed.numberCandidates()
+        val horizontalLines = numbers.toHorizontalLines(horizontalContours)
 
         trainModel()
-        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals)
+        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals, horizontalLines)
     }
 
     private fun initView(vararg images: Mat) {
@@ -170,6 +173,44 @@ private fun Mat.horizontalLines(): Mat {
     return structure(structureSize)
 }
 
+private fun Mat.toHorizontalLines(horizontalContours: List<MatOfPoint>): Mat {
+    val lines: List<Pair<Point, Point>> = horizontalContours
+        .map { boundingRect(it) }
+        .sortedBy { it.y }
+        .fold(listOf()) { acc: List<Rect>, r: Rect ->
+            when {
+                acc.isEmpty() -> listOf(r)
+                acc.last().isSameLineAs(r) -> acc.dropLast(1) + union(acc.last(), r)
+                else -> acc + r
+            }
+        }
+        .map { Pair(Point(it.left().toDouble(), it.center().y), Point(it.right().toDouble(), it.center().y)) }
+    val result = Mat()
+    copyTo(result)
+    for (line in lines) {
+        line(result, line.first, line.second, Scalar(255.0, 0.0, 0.0))
+    }
+    return result
+}
+
+fun union(first: Rect, second: Rect): Rect =
+    Rect(
+        Point(min(first.left(), second.left()).toDouble(), min(first.top(), second.top()).toDouble()),
+        Point(max(first.right(), second.right()).toDouble(), max(first.bottom(), second.bottom()).toDouble())
+    )
+
+private fun Rect.left() = x
+private fun Rect.right() = x + width
+private fun Rect.top() = y
+private fun Rect.bottom() = y + height
+
+private fun Rect.isSameLineAs(other: Rect) = center().isVerticallyBoundBy(other)
+
+private fun Point.isVerticallyBoundBy(rectangle: Rect) = y >= rectangle.y && y <= rectangle.y + rectangle.height
+
+fun Rect.center() = Point(x + width.toDouble().div(2), y + height.toDouble().div(2))
+
+
 private fun Mat.structure(structureSize: Size): Mat {
     val destination = clone()
     val structure = getStructuringElement(MORPH_RECT, structureSize)
@@ -234,8 +275,8 @@ private fun mlData(labeledImages: List<Pair<Int, Path>>): Triple<Mat, Mat, List<
     val features = images.toFeatures()
     val labels = vector_int_to_Mat(
         labeledImages
-        .map { it.first }
-        .toList()
+            .map { it.first }
+            .toList()
     ).toFloats()
     return Triple(features, labels, labeledImages.map { it.second })
 }
@@ -262,7 +303,7 @@ private fun Mat.hogFeatures(): Mat {
     return descriptor.columnToRow()
 }
 
-private fun Mat.columnToRow():Mat {
+private fun Mat.columnToRow(): Mat {
     val result = Mat(1, rows(), type())
     for (i in 0 until rows()) result.put(0, i, get(i, 0)[0])
     return result
