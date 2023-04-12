@@ -39,7 +39,7 @@ class FxApp : Application() {
         val deskewedContours = cleanedUpDeskewed.contours().image
         val verticals = cleanedUpDeskewed.verticalLines().contours().image
         val horizontals = cleanedUpDeskewed.horizontalLines().contours().image
-        val numbers = cleanedUpDeskewed.numberCandidates()
+        val (numbers, _) = cleanedUpDeskewed.numberCandidates()
 
         trainModel()
         initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, numbers, verticals, horizontals)
@@ -97,7 +97,7 @@ private fun Mat.toGrayScale(): Mat {
 private fun Mat.threshold(): Mat {
     val destination = Mat()
     Core.bitwise_not(this, destination)
-    adaptiveThreshold(destination, destination, 255.0, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 15, -2.0)
+    adaptiveThreshold(destination, destination, 255.0, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, -10.0)
     return destination
 }
 
@@ -157,14 +157,14 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
 }
 
 private fun Mat.verticalLines(): Mat {
-    val verticalSize: Int = rows() / 20
+    val verticalSize: Int = rows() / 25
     val structureSize = Size(1.0, verticalSize.toDouble())
 
     return structure(structureSize)
 }
 
 private fun Mat.horizontalLines(): Mat {
-    val horizontalSize: Int = cols() / 20
+    val horizontalSize: Int = cols() / 25
     val structureSize = Size(horizontalSize.toDouble(), 1.0)
 
     return structure(structureSize)
@@ -190,7 +190,7 @@ private fun MatOfPoint2f.toInts(): MatOfPoint {
     return destination
 }
 
-private fun Mat.numberCandidates(): Mat {
+private fun Mat.numberCandidates(): Contours {
     val numbers = contours().contours
         .map { it.toFloats() }
         .filter {
@@ -200,7 +200,7 @@ private fun Mat.numberCandidates(): Mat {
     val destination = Mat.zeros(size(), CV_8UC3)
     for (i in numbers.indices)
         drawContours(destination, numbers, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, Mat(), 0, Point())
-    return destination
+    return Contours(destination, numbers)
 }
 
 private fun trainModel() {
