@@ -44,10 +44,28 @@ class FxApp : Application() {
         val (numbersImage, numberCandidates) = cleanedUpDeskewed.numberCandidates()
         val (horizontalLinesImage, horizontalLines) = numbersImage.withHorizontalLines(horizontalContours)
         val (gridImage, verticalLines) = horizontalLinesImage.withVerticalLines(verticalContours)
-        val imageWithCoordinates = gridImage.withContoursCoordinates(numberCandidates, horizontalLines, verticalLines)
+        val gridWithCoordinates = gridImage.withContoursCoordinates(numberCandidates, horizontalLines, verticalLines)
 
-        trainModel()
-        initView(original, deskewedImage, cleanedUpDeskewed, deskewedContours, imageWithCoordinates)
+        val digitClassifier = DigitClassifier()
+        val (redrawnGrid, _) =
+            deskewedImage.redrawGrid(digitClassifier, numberCandidates, horizontalLines, verticalLines)
+        initView(original, deskewedImage, deskewedContours, gridWithCoordinates, redrawnGrid)
+    }
+
+    private fun Mat.redrawGrid(
+        digitClassifier: DigitClassifier,
+        numberCandidates: List<MatOfPoint>,
+        horizontalLines: List<Pair<Point, Point>>,
+        verticalLines: List<Pair<Point, Point>>
+    ): Pair<Mat, List<Pair<Mat, Float>>> {
+        val digits = numberCandidates.toList()
+            .map { boundingRect(it) }
+            .map { Rect(Point((it.x - 2).toDouble(), (it.y - 2).toDouble()), Size(it.width + 4.0, it.height + 4.0)) }
+            .map { Pair(digitClassifier.digit(submat(it)), it) }
+        val result = Mat(size(), CV_8UC3, Scalar(0.0, 0.0, 0.0))
+        for (digit in digits)
+            putText(result, "${digit.first}", digit.second.bottomLeft(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0.0, 255.0, 0.0))
+        return Pair(result.withLines(horizontalLines).withLines(verticalLines), listOf())
     }
 
     private fun initView(vararg images: Mat) {
@@ -272,6 +290,7 @@ private fun Rect.right() = x + width
 private fun Rect.top() = y
 private fun Rect.bottom() = y + height
 fun Rect.center() = Point(x + width.toDouble().div(2), y + height.toDouble().div(2))
+private fun Rect.bottomLeft() = Point(left().toDouble(), bottom().toDouble())
 
 private data class Lines(val image: Mat, val lines: List<Pair<Point, Point>>)
 
@@ -308,73 +327,80 @@ private fun Mat.numberCandidates(): Contours {
     return Contours(destination, numbers)
 }
 
-private fun trainModel() {
-    val labeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
-        .filter { it.extension == "png" }
-        .map { Pair(it.parent.fileName.toString().toInt(), it) }
-        .toList()
-        .shuffled()
-    val (trainingLabeledImages, testLabeledImages) = labeledImages.chunked(labeledImages.size * 9 / 10)
-    val (trainingFeatures, trainingLabels) = mlData(trainingLabeledImages)
+private class DigitClassifier() {
+    private val knn: KNearest = KNearest.create()
+    private val numberOfNeighbours = 5
 
-    val knn = KNearest.create()
-    knn.defaultK = 5
-    knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
+    init {
+        val labeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
+            .filter { it.extension == "png" }
+            .map { Pair(it.parent.fileName.toString().toInt(), it) }
+            .toList()
+            .shuffled()
+        val (trainingLabeledImages, testLabeledImages) = labeledImages.chunked(labeledImages.size * 9 / 10)
+        val (trainingFeatures, trainingLabels) = trainingData(trainingLabeledImages)
+        knn.defaultK = numberOfNeighbours
+        knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
+        val (testFeatures, testLabels, testImagePaths) = trainingData(testLabeledImages)
+        for (i in 0 until testFeatures.rows()) {
+            val nearest = knn.findNearest(testFeatures.row(i), numberOfNeighbours, Mat()).toDouble()
+            val expected = testLabels.get(i, 0)[0]
+            println("${if (nearest == expected) "-" else "X"} got $nearest expected $expected for ${testImagePaths[i]}")
+        }
+    }
 
-    val (testFeatures, testLabels, testImagePaths) = mlData(testLabeledImages)
-    for (i in 0 until testFeatures.rows()) {
-        val nearest = knn.findNearest(testFeatures.row(i), 5, Mat()).toDouble()
-        val expected = testLabels.get(i, 0)[0]
-        println("${if (nearest == expected) "-" else "X"} got $nearest expected $expected for ${testImagePaths[i]}")
+
+    fun digit(image: Mat): Int =
+        knn.findNearest(image.resize(20.0, 20.0).hogFeatures(), numberOfNeighbours, Mat()).toInt()
+
+    private fun trainingData(labeledImages: List<Pair<Int, Path>>): Triple<Mat, Mat, List<Path>> {
+        val images = labeledImages.asSequence()
+            .map { it.second }
+            .map { loadImage(it.toString()) }
+            .map { it.resize(20.0, 20.0) }
+            .map { it.toGrayScale() }
+            .toList()
+        val features = images.toFeatures()
+        val labels = vector_int_to_Mat(
+            labeledImages
+                .map { it.first }
+                .toList()
+        ).toFloats()
+        return Triple(features, labels, labeledImages.map { it.second })
+    }
+
+    private fun List<Mat>.toFeatures(): Mat {
+        val result = Mat()
+        this
+            .map { it.hogFeatures() }
+            .forEach { result.push_back(it) }
+        return result
+    }
+
+    private fun Mat.hogFeatures(): Mat {
+        val hog = HOGDescriptor(
+            Size(20.0, 20.0),
+            Size(10.0, 10.0),
+            Size(5.0, 5.0),
+            Size(5.0, 5.0),
+            9
+        )
+
+        val descriptor = MatOfFloat()
+        hog.compute(this, descriptor)
+        return descriptor.columnToRow()
+    }
+
+    private fun Mat.columnToRow(): Mat {
+        val result = Mat(1, rows(), type())
+        for (i in 0 until rows()) result.put(0, i, get(i, 0)[0])
+        return result
+    }
+
+    private fun Mat.toFloats(): Mat {
+        val destination = Mat(rows(), cols(), CV_32F)
+        convertTo(destination, CV_32F)
+        return destination
     }
 }
 
-private fun mlData(labeledImages: List<Pair<Int, Path>>): Triple<Mat, Mat, List<Path>> {
-    val images = labeledImages.asSequence()
-        .map { it.second }
-        .map { loadImage(it.toString()) }
-        .map { it.resize(20.0, 20.0) }
-        .map { it.toGrayScale() }
-        .toList()
-    val features = images.toFeatures()
-    val labels = vector_int_to_Mat(
-        labeledImages
-            .map { it.first }
-            .toList()
-    ).toFloats()
-    return Triple(features, labels, labeledImages.map { it.second })
-}
-
-private fun List<Mat>.toFeatures(): Mat {
-    val result = Mat()
-    this
-        .map { it.hogFeatures() }
-        .forEach { result.push_back(it) }
-    return result
-}
-
-private fun Mat.hogFeatures(): Mat {
-    val hog = HOGDescriptor(
-        Size(20.0, 20.0),
-        Size(10.0, 10.0),
-        Size(5.0, 5.0),
-        Size(5.0, 5.0),
-        9
-    )
-
-    val descriptor = MatOfFloat()
-    hog.compute(this, descriptor)
-    return descriptor.columnToRow()
-}
-
-private fun Mat.columnToRow(): Mat {
-    val result = Mat(1, rows(), type())
-    for (i in 0 until rows()) result.put(0, i, get(i, 0)[0])
-    return result
-}
-
-private fun Mat.toFloats(): Mat {
-    val destination = Mat(rows(), cols(), CV_32F)
-    convertTo(destination, CV_32F)
-    return destination
-}
