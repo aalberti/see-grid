@@ -38,7 +38,6 @@ class FxApp : Application() {
         val trapezoidContour = original.trapezoidContour(biggestContour)
         val deskewedImage = original.toRectangle(trapezoidContour.contour)
         val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
-        val deskewedContours = cleanedUpDeskewed.contours().image
         val (_, verticalContours) = cleanedUpDeskewed.verticalLines().contours()
         val (_, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
         val (numbersImage, numberCandidates) = cleanedUpDeskewed.numberCandidates()
@@ -47,9 +46,8 @@ class FxApp : Application() {
         val gridWithCoordinates = gridImage.withContoursCoordinates(numberCandidates, horizontalLines, verticalLines)
 
         val digitClassifier = DigitClassifier()
-        val (redrawnGrid, _) =
-            deskewedImage.redrawGrid(digitClassifier, numberCandidates, horizontalLines, verticalLines)
-        initView(original, deskewedImage, deskewedContours, gridWithCoordinates, redrawnGrid)
+        val redrawnGrid = deskewedImage.redrawGrid(digitClassifier, numberCandidates, horizontalLines, verticalLines)
+        initView(original, deskewedImage, gridWithCoordinates, redrawnGrid)
     }
 
     private fun Mat.redrawGrid(
@@ -57,15 +55,22 @@ class FxApp : Application() {
         numberCandidates: List<MatOfPoint>,
         horizontalLines: List<Pair<Point, Point>>,
         verticalLines: List<Pair<Point, Point>>
-    ): Pair<Mat, List<Pair<Mat, Float>>> {
+    ): Mat {
         val digits = numberCandidates.toList()
             .map { boundingRect(it) }
-            .map { Rect(Point((it.x - 2).toDouble(), (it.y - 2).toDouble()), Size(it.width + 4.0, it.height + 4.0)) }
+            .map { it.plusMargin(2) }
             .map { Pair(digitClassifier.digit(submat(it)), it) }
         val result = Mat(size(), CV_8UC3, Scalar(0.0, 0.0, 0.0))
         for (digit in digits)
-            putText(result, "${digit.first}", digit.second.bottomLeft(), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0.0, 255.0, 0.0))
-        return Pair(result.withLines(horizontalLines).withLines(verticalLines), listOf())
+            putText(
+                result,
+                "${digit.first}",
+                digit.second.bottomLeft(),
+                FONT_HERSHEY_SIMPLEX,
+                0.5,
+                Scalar(0.0, 255.0, 0.0)
+            )
+        return result.withLines(horizontalLines).withLines(verticalLines)
     }
 
     private fun initView(vararg images: Mat) {
@@ -291,6 +296,10 @@ private fun Rect.top() = y
 private fun Rect.bottom() = y + height
 fun Rect.center() = Point(x + width.toDouble().div(2), y + height.toDouble().div(2))
 private fun Rect.bottomLeft() = Point(left().toDouble(), bottom().toDouble())
+private fun Rect.plusMargin(margin: Int) = Rect(
+    Point((left() - margin).toDouble(), (top() - margin).toDouble()),
+    Point((right() + margin).toDouble(), (bottom() + margin).toDouble())
+)
 
 private data class Lines(val image: Mat, val lines: List<Pair<Point, Point>>)
 
@@ -329,26 +338,18 @@ private fun Mat.numberCandidates(): Contours {
 
 private class DigitClassifier() {
     private val knn: KNearest = KNearest.create()
-    private val numberOfNeighbours = 5
+    private val numberOfNeighbours = 3
 
     init {
-        val labeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
+        val trainingLabeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
             .filter { it.extension == "png" }
             .map { Pair(it.parent.fileName.toString().toInt(), it) }
             .toList()
             .shuffled()
-        val (trainingLabeledImages, testLabeledImages) = labeledImages.chunked(labeledImages.size * 9 / 10)
         val (trainingFeatures, trainingLabels) = trainingData(trainingLabeledImages)
         knn.defaultK = numberOfNeighbours
         knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
-        val (testFeatures, testLabels, testImagePaths) = trainingData(testLabeledImages)
-        for (i in 0 until testFeatures.rows()) {
-            val nearest = knn.findNearest(testFeatures.row(i), numberOfNeighbours, Mat()).toDouble()
-            val expected = testLabels.get(i, 0)[0]
-            println("${if (nearest == expected) "-" else "X"} got $nearest expected $expected for ${testImagePaths[i]}")
-        }
     }
-
 
     fun digit(image: Mat): Int =
         knn.findNearest(image.resize(20.0, 20.0).hogFeatures(), numberOfNeighbours, Mat()).toInt()
