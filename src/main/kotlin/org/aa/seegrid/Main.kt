@@ -31,7 +31,7 @@ fun main() {
 
 class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
-        val original = loadImage("src/main/resources/images/voisimage droite.jpg")
+        val original = loadImage("src/main/resources/images/voisimage peluches.jpg")
             .resize(700)
         val (imageWithContours, contours) = original.toGrayScale().threshold().contours()
         val (_, biggestContour) = imageWithContours.biggestContour(contours)
@@ -64,7 +64,7 @@ class FxApp : Application() {
         for (digit in digits)
             putText(
                 result,
-                "${digit.first}",
+                digit.first,
                 digit.second.bottomLeft(),
                 FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -336,9 +336,9 @@ private fun Mat.numberCandidates(): Contours {
     return Contours(destination, numbers)
 }
 
-private class DigitClassifier() {
+private class DigitClassifier {
     private val knn: KNearest = KNearest.create()
-    private val numberOfNeighbours = 3
+    private val numberOfNeighbours = 5
 
     init {
         val trainingLabeledImages = Files.walk(Path.of("src/main/resources/images/numbers"))
@@ -351,8 +351,15 @@ private class DigitClassifier() {
         knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
     }
 
-    fun digit(image: Mat): Int =
-        knn.findNearest(image.resize(20.0, 20.0).hogFeatures(), numberOfNeighbours, Mat()).toInt()
+    fun digit(image: Mat): String {
+        val neighbours = Mat()
+        val champion = knn.findNearest(image.resize(20.0, 20.0).hogFeatures(), numberOfNeighbours, Mat(), neighbours)
+            .toInt()
+        return if (neighbours.areAll(champion))
+            champion.toString()
+        else
+            "$champion?"
+    }
 
     private fun trainingData(labeledImages: List<Pair<Int, Path>>): Triple<Mat, Mat, List<Path>> {
         val images = labeledImages.asSequence()
@@ -403,5 +410,13 @@ private class DigitClassifier() {
         convertTo(destination, CV_32F)
         return destination
     }
+}
+
+private fun Mat.areAll(champion: Int): Boolean {
+    for (i in 0 until rows())
+        for (j in 0 until cols())
+            if (get(i, j)[0].toInt() != champion)
+                return false
+    return true
 }
 
