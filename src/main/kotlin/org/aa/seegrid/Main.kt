@@ -8,6 +8,7 @@ import javafx.scene.image.ImageView
 import javafx.scene.layout.FlowPane
 import javafx.stage.Stage
 import nu.pattern.OpenCV
+import org.aa.seegrid.Color.*
 import org.opencv.core.*
 import org.opencv.core.CvType.*
 import org.opencv.imgcodecs.Imgcodecs
@@ -33,33 +34,36 @@ class FxApp : Application() {
     override fun start(primaryStage: Stage?) {
         val original = loadImage("src/main/resources/images/voisimage peluches.jpg")
             .resize(700)
-        val (imageWithContours, contours) = original.toGrayScale().threshold().contours()
-        val (_, biggestContour) = imageWithContours.biggestContour(contours)
-        val trapezoidContour = original.trapezoidContour(biggestContour)
-        val deskewedImage = original.toRectangle(trapezoidContour.contour)
+        val threshold = original.toGrayScale().threshold()
+        val contours = threshold.extractContours()
+        val biggestContour = biggestContour(contours)
+        val trapezoidContour = trapezoidContour(biggestContour)
+        val deskewedImage = original.toRectangle(trapezoidContour)
         val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
-        val (_, verticalContours) = cleanedUpDeskewed.verticalLines().contours()
-        val (_, horizontalContours) = cleanedUpDeskewed.horizontalLines().contours()
-        val (numbersImage, numberCandidates) = cleanedUpDeskewed.numberCandidates()
-        val (horizontalLinesImage, horizontalLines) = numbersImage.withHorizontalLines(horizontalContours)
-        val (gridImage, verticalLines) = horizontalLinesImage.withVerticalLines(verticalContours)
-        val gridWithCoordinates = gridImage.withContoursCoordinates(numberCandidates, horizontalLines, verticalLines)
+        val verticalContours = cleanedUpDeskewed.verticalLines().extractContours()
+        val horizontalContours = cleanedUpDeskewed.horizontalLines().extractContours()
+        val numberCandidates = cleanedUpDeskewed.extractContours().filterNumberCandidates()
 
         val digitClassifier = DigitClassifier()
-        val redrawnGrid = deskewedImage.redrawGrid(digitClassifier, numberCandidates, horizontalLines, verticalLines)
+        val horizontalLines = toHorizontalLines(horizontalContours)
+        val verticalLines = toVerticalLines(verticalContours)
+        val positionedCandidates = positionContours(numberCandidates, verticalLines, horizontalLines)
+        val regionsOfInterests = deskewedImage.regionsOfInterest(numberCandidates)
+        val digits = classify(regionsOfInterests, digitClassifier)
+
+        val numbersImage = cleanedUpDeskewed.black().drawContours(numberCandidates, PURPLE)
+        val horizontalLinesImage = numbersImage.withLines(horizontalLines)
+        val gridImage = horizontalLinesImage.withLines(verticalLines)
+        val gridWithCoordinates = gridImage.withPositions(positionedCandidates)
+        val redrawnGrid = deskewedImage.redrawGrid(digits, horizontalLines, verticalLines)
         initView(original, deskewedImage, gridWithCoordinates, redrawnGrid)
     }
 
     private fun Mat.redrawGrid(
-        digitClassifier: DigitClassifier,
-        numberCandidates: List<MatOfPoint>,
+        digits: List<Pair<String, Rect>>,
         horizontalLines: List<Pair<Point, Point>>,
         verticalLines: List<Pair<Point, Point>>
     ): Mat {
-        val digits = numberCandidates.toList()
-            .map { boundingRect(it) }
-            .map { it.plusMargin(2) }
-            .map { Pair(digitClassifier.digit(submat(it)), it) }
         val result = Mat(size(), CV_8UC3, Scalar(0.0, 0.0, 0.0))
         for (digit in digits)
             putText(
@@ -68,10 +72,19 @@ class FxApp : Application() {
                 digit.second.bottomLeft(),
                 FONT_HERSHEY_SIMPLEX,
                 0.5,
-                Scalar(0.0, 255.0, 0.0)
+                GREEN.bgr
             )
         return result.withLines(horizontalLines).withLines(verticalLines)
     }
+
+    private fun classify(regionsOfInterests: List<Pair<Mat, Rect>>, digitClassifier: DigitClassifier) =
+        regionsOfInterests
+            .map { Pair(digitClassifier.digit(it.first), it.second) }
+
+    private fun Mat.regionsOfInterest(numberCandidates: List<MatOfPoint>) =
+        numberCandidates.toList()
+            .map { boundingRect(it).plusMargin(2) }
+            .map { Pair(submat(it), it) }
 
     private fun initView(vararg images: Mat) {
         val pane = FlowPane()
@@ -99,15 +112,9 @@ class FxApp : Application() {
     }
 }
 
-private fun Mat.withContoursCoordinates(
-    contours: List<MatOfPoint>,
-    horizontalLines: List<Pair<Point, Point>>,
-    verticalLines: List<Pair<Point, Point>>
-): Mat {
+private fun Mat.withPositions(positionedRectangles: List<PositionedRectangle>): Mat {
     val copy = copy()
-    contours
-        .map { boundingRect(it) }
-        .map { PositionedRectangle(column(it, verticalLines), row(it, horizontalLines), it) }
+    positionedRectangles
         .forEach {
             putText(
                 copy,
@@ -115,11 +122,19 @@ private fun Mat.withContoursCoordinates(
                 Point(it.rectangle.x.toDouble(), (it.rectangle.y - 10).toDouble()),
                 FONT_HERSHEY_SIMPLEX,
                 0.4,
-                Scalar(0.0, 0.0, 255.0)
+                RED.bgr
             )
         }
     return copy
 }
+
+private fun positionContours(
+    contours: List<MatOfPoint>,
+    verticalLines: List<Pair<Point, Point>>,
+    horizontalLines: List<Pair<Point, Point>>
+): List<PositionedRectangle> = contours
+    .map { boundingRect(it) }
+    .map { PositionedRectangle(column(it, verticalLines), row(it, horizontalLines), it) }
 
 private fun Mat.copy(): Mat {
     val result = Mat()
@@ -127,7 +142,7 @@ private fun Mat.copy(): Mat {
     return result
 }
 
-class PositionedRectangle(val column: Int, val row: Int, val rectangle: Rect)
+data class PositionedRectangle(val column: Int, val row: Int, val rectangle: Rect)
 
 fun column(rectangle: Rect, verticalLines: List<Pair<Point, Point>>): Int {
     for (i in 0 until verticalLines.size - 1) {
@@ -175,29 +190,16 @@ private fun Mat.threshold(): Mat {
     return destination
 }
 
-private fun Mat.contours(): Contours {
+private fun Mat.extractContours(): List<MatOfPoint> {
     val contours: List<MatOfPoint> = ArrayList()
     val hierarchy = Mat()
     findContours(this, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE)
-    val destination = Mat.zeros(size(), CV_8UC3)
-    for (i in contours.indices)
-        drawContours(destination, contours, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, hierarchy, 0, Point())
-    return Contours(destination, contours)
+    return contours
 }
 
-private fun Mat.biggestContour(contours: List<MatOfPoint>): Contour {
-    val destination = copy()
-    val biggestContour = contours.maxBy { contourArea(it) }
-    drawContours(destination, listOf(biggestContour), -1, Scalar(255.0, 0.0, 0.0), 2)
-    return Contour(destination, biggestContour)
-}
+private fun biggestContour(contours: List<MatOfPoint>) = contours.maxBy { contourArea(it) }
 
-private fun Mat.trapezoidContour(biggestContour: MatOfPoint): Contour {
-    val destination = copy()
-    val approximatedContour = approximate(biggestContour)
-    drawContours(destination, listOf(approximatedContour), -1, Scalar(255.0, 255.0, 255.0), 3)
-    return Contour(destination, approximatedContour)
-}
+private fun trapezoidContour(biggestContour: MatOfPoint) = approximate(biggestContour)
 
 private fun approximate(contour: MatOfPoint): MatOfPoint {
     val contour2F = MatOfPoint2f()
@@ -209,10 +211,6 @@ private fun approximate(contour: MatOfPoint): MatOfPoint {
     approximated2F.convertTo(approximatedContour, CV_32S)
     return approximatedContour
 }
-
-data class Contours(val image: Mat, val contours: List<MatOfPoint>)
-
-data class Contour(val image: Mat, val contour: MatOfPoint)
 
 private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
     val rectangle = MatOfPoint(
@@ -241,7 +239,7 @@ private fun Mat.horizontalLines(): Mat {
     return structure(structureSize)
 }
 
-private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Lines {
+private fun toHorizontalLines(horizontalContours: List<MatOfPoint>): List<Pair<Point, Point>> {
     val lines: List<Pair<Point, Point>> = horizontalContours
         .map { boundingRect(it) }
         .sortedBy { it.y }
@@ -253,10 +251,10 @@ private fun Mat.withHorizontalLines(horizontalContours: List<MatOfPoint>): Lines
             }
         }
         .map { Pair(Point(it.left().toDouble(), it.center().y), Point(it.right().toDouble(), it.center().y)) }
-    return Lines(withLines(lines), lines)
+    return lines
 }
 
-private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Lines {
+private fun toVerticalLines(verticalContours: List<MatOfPoint>): List<Pair<Point, Point>> {
     val lines: List<Pair<Point, Point>> = verticalContours
         .map { boundingRect(it) }
         .sortedBy { it.x }
@@ -268,7 +266,7 @@ private fun Mat.withVerticalLines(verticalContours: List<MatOfPoint>): Lines {
             }
         }
         .map { Pair(Point(it.center().x, it.top().toDouble()), Point(it.center().x, it.bottom().toDouble())) }
-    return Lines(withLines(lines), lines)
+    return lines
 }
 
 private fun Rect.isSameHorizontalLineAs(other: Rect) = center().isVerticallyBoundBy(other)
@@ -280,7 +278,7 @@ private fun Point.isHorizontallyBoundBy(rectangle: Rect) =
 
 private fun Mat.withLines(lines: List<Pair<Point, Point>>): Mat {
     val result = copy()
-    for (line in lines) line(result, line.first, line.second, Scalar(255.0, 0.0, 0.0))
+    for (line in lines) line(result, line.first, line.second, BLUE.bgr)
     return result
 }
 
@@ -300,8 +298,6 @@ private fun Rect.plusMargin(margin: Int) = Rect(
     Point((left() - margin).toDouble(), (top() - margin).toDouble()),
     Point((right() + margin).toDouble(), (bottom() + margin).toDouble())
 )
-
-private data class Lines(val image: Mat, val lines: List<Pair<Point, Point>>)
 
 private fun Mat.structure(structureSize: Size): Mat {
     val destination = clone()
@@ -323,17 +319,25 @@ private fun MatOfPoint2f.toInts(): MatOfPoint {
     return destination
 }
 
-private fun Mat.numberCandidates(): Contours {
-    val numbers = contours().contours
-        .map { it.toFloats() }
-        .filter {
-            val boundingRect = minAreaRect(it).boundingRect()
-            boundingRect.width in 4..20 && boundingRect.height in 12..20
-        }.map { it.toInts() }
-    val destination = Mat.zeros(size(), CV_8UC3)
-    for (i in numbers.indices)
-        drawContours(destination, numbers, i, Scalar(255.0, 0.0, 255.0), 1, LINE_8, Mat(), 0, Point())
-    return Contours(destination, numbers)
+private fun List<MatOfPoint>.filterNumberCandidates(): List<MatOfPoint> = map { it.toFloats() }
+    .filter {
+        val boundingRect = boundingRect(it)
+        boundingRect.width in 4..20 && boundingRect.height in 12..20
+    }.map { it.toInts() }
+
+private fun Mat.drawContours(contours: List<MatOfPoint>, color: Color, thickness:Int = 1): Mat {
+    val result = copy()
+    drawContours(result, contours, -1, color.bgr, thickness)
+    return result
+}
+
+private fun Mat.black(): Mat = Mat.zeros(size(), CV_8UC3)
+
+enum class Color(val bgr: Scalar) {
+    PURPLE(Scalar(255.0, 0.0, 255.0)),
+    BLUE(Scalar(255.0, 0.0, 0.0)),
+    GREEN(Scalar(0.0, 255.0, 0.0)),
+    RED(Scalar(0.0, 0.0, 255.0)),
 }
 
 private class DigitClassifier {
