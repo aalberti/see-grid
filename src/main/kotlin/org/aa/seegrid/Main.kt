@@ -47,13 +47,14 @@ class FxApp : Application() {
         val verticalLines = cleanedUpDeskewed.verticalLines()
         val positionedCandidates = positionContours(numberCandidates, verticalLines, horizontalLines)
         val regionsOfInterests = deskewedImage.regionsOfInterest(numberCandidates)
-        val digits = classify(regionsOfInterests, digitClassifier)
+        val digits = digitClassifier.classify(regionsOfInterests.map { it.first })
+        val boundedDigits = digits.zip(regionsOfInterests) { digit, imageAndRect -> Pair(digit, imageAndRect.second) }
 
         val numbersImage = cleanedUpDeskewed.black().drawContours(numberCandidates, PURPLE)
         val horizontalLinesImage = numbersImage.withLines(horizontalLines)
         val gridImage = horizontalLinesImage.withLines(verticalLines)
         val gridWithCoordinates = gridImage.withPositions(positionedCandidates)
-        val redrawnGrid = deskewedImage.redrawGrid(digits, horizontalLines, verticalLines)
+        val redrawnGrid = deskewedImage.redrawGrid(boundedDigits, horizontalLines, verticalLines)
         initView(original, deskewedImage, gridWithCoordinates, redrawnGrid)
     }
 
@@ -75,10 +76,6 @@ class FxApp : Application() {
             )
         return result.withLines(horizontalLines).withLines(verticalLines)
     }
-
-    private fun classify(regionsOfInterests: List<Pair<Mat, Rect>>, digitClassifier: DigitClassifier) =
-        regionsOfInterests
-            .map { Pair(digitClassifier.digit(it.first), it.second) }
 
     private fun Mat.regionsOfInterest(numberCandidates: List<MatOfPoint>) =
         numberCandidates.toList()
@@ -342,7 +339,9 @@ private class DigitClassifier {
         knn.train(trainingFeatures, ROW_SAMPLE, trainingLabels)
     }
 
-    fun digit(image: Mat): String {
+    fun classify(images: List<Mat>) = images.map { classify(it) }
+
+    private fun classify(image: Mat): String {
         val neighbours = Mat()
         val champion = knn.findNearest(image.resize(20.0, 20.0).hogFeatures(), numberOfNeighbours, Mat(), neighbours)
             .toInt()
