@@ -40,13 +40,11 @@ class FxApp : Application() {
         val trapezoidContour = trapezoidContour(biggestContour)
         val deskewedImage = original.toRectangle(trapezoidContour)
         val cleanedUpDeskewed = deskewedImage.toGrayScale().threshold()
-        val verticalContours = cleanedUpDeskewed.verticalLines().extractContours()
-        val horizontalContours = cleanedUpDeskewed.horizontalLines().extractContours()
         val numberCandidates = cleanedUpDeskewed.extractContours().filterNumberCandidates()
 
         val digitClassifier = DigitClassifier()
-        val horizontalLines = toHorizontalLines(horizontalContours)
-        val verticalLines = toVerticalLines(verticalContours)
+        val horizontalLines = cleanedUpDeskewed.horizontalLines()
+        val verticalLines = cleanedUpDeskewed.verticalLines()
         val positionedCandidates = positionContours(numberCandidates, verticalLines, horizontalLines)
         val regionsOfInterests = deskewedImage.regionsOfInterest(numberCandidates)
         val digits = classify(regionsOfInterests, digitClassifier)
@@ -58,6 +56,7 @@ class FxApp : Application() {
         val redrawnGrid = deskewedImage.redrawGrid(digits, horizontalLines, verticalLines)
         initView(original, deskewedImage, gridWithCoordinates, redrawnGrid)
     }
+
 
     private fun Mat.redrawGrid(
         digits: List<Pair<String, Rect>>,
@@ -225,22 +224,10 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
     return destination
 }
 
-private fun Mat.verticalLines(): Mat {
-    val verticalSize: Int = rows() / 25
-    val structureSize = Size(1.0, verticalSize.toDouble())
-
-    return structure(structureSize)
-}
-
-private fun Mat.horizontalLines(): Mat {
-    val horizontalSize: Int = cols() / 25
-    val structureSize = Size(horizontalSize.toDouble(), 1.0)
-
-    return structure(structureSize)
-}
-
-private fun toHorizontalLines(horizontalContours: List<MatOfPoint>): List<Pair<Point, Point>> {
-    val lines: List<Pair<Point, Point>> = horizontalContours
+private fun Mat.horizontalLines(): List<Pair<Point, Point>> {
+    val minWidth = (cols() / 25).toDouble()
+    val horizontalContours = structure(Size(minWidth, 1.0)).extractContours()
+    return horizontalContours
         .map { boundingRect(it) }
         .sortedBy { it.y }
         .fold(listOf()) { acc: List<Rect>, r: Rect ->
@@ -251,11 +238,12 @@ private fun toHorizontalLines(horizontalContours: List<MatOfPoint>): List<Pair<P
             }
         }
         .map { Pair(Point(it.left().toDouble(), it.center().y), Point(it.right().toDouble(), it.center().y)) }
-    return lines
 }
 
-private fun toVerticalLines(verticalContours: List<MatOfPoint>): List<Pair<Point, Point>> {
-    val lines: List<Pair<Point, Point>> = verticalContours
+private fun Mat.verticalLines(): List<Pair<Point, Point>> {
+    val minHeight = (rows() / 25).toDouble()
+    val verticalContours = structure(Size(1.0, minHeight)).extractContours()
+    return verticalContours
         .map { boundingRect(it) }
         .sortedBy { it.x }
         .fold(listOf()) { acc: List<Rect>, r: Rect ->
@@ -266,7 +254,6 @@ private fun toVerticalLines(verticalContours: List<MatOfPoint>): List<Pair<Point
             }
         }
         .map { Pair(Point(it.center().x, it.top().toDouble()), Point(it.center().x, it.bottom().toDouble())) }
-    return lines
 }
 
 private fun Rect.isSameHorizontalLineAs(other: Rect) = center().isVerticallyBoundBy(other)
@@ -325,9 +312,9 @@ private fun List<MatOfPoint>.filterNumberCandidates(): List<MatOfPoint> = map { 
         boundingRect.width in 4..20 && boundingRect.height in 12..20
     }.map { it.toInts() }
 
-private fun Mat.drawContours(contours: List<MatOfPoint>, color: Color, thickness:Int = 1): Mat {
+private fun Mat.drawContours(contours: List<MatOfPoint>, color: Color): Mat {
     val result = copy()
-    drawContours(result, contours, -1, color.bgr, thickness)
+    drawContours(result, contours, -1, color.bgr)
     return result
 }
 
