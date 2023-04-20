@@ -244,22 +244,27 @@ fun rows(positionedDigits: List<PositionedDigit>, gridSize: Pair<Int, Int>) = (0
 
 fun cells(numberOfColumns: Int, positionedDigits: List<PositionedDigit>, rowIndex: Int): List<String> =
     (0 until numberOfColumns)
-        .map { """
+        .map {
+            val hint = hint(positionedDigits, rowIndex, it)
+            """
             |    {
             |      "state": "unknown",
-            |      "hint": "${hint(positionedDigits, rowIndex, it)}",
+            |      "hint": "${hint.first}",
+            |      "isSureHint": ${hint.second},
             |      "help": "foo"
             |    }""".trimMargin()
         }
 
 fun hint(positionedDigits: List<PositionedDigit>, rowIndex: Int, columnIndex: Int) = positionedDigits
     .find { it.column == columnIndex && it.row == rowIndex }
-    ?.digit.dropQuestion()
-    ?: ""
+    ?.let { Pair(it.digit.dropQuestion(), it.digit.isSureHint()) }
+    ?: Pair("", true)
 
-private fun String?.dropQuestion() =
-    if (this != null && endsWith("?")) dropLast(1)
+private fun String.dropQuestion() =
+    if (endsWith("?")) dropLast(1)
     else this
+
+private fun String.isSureHint() = !endsWith("?")
 
 private fun gridSize(horizontalLines: List<Pair<Point, Point>>, verticalLines: List<Pair<Point, Point>>) =
     Pair(verticalLines.size - 1, horizontalLines.size - 1)
