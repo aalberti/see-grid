@@ -18,6 +18,7 @@ import org.opencv.ml.Ml.ROW_SAMPLE
 import org.opencv.objdetect.HOGDescriptor
 import org.opencv.utils.Converters.*
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.lang.Integer.max
 import java.nio.file.Files
 import java.nio.file.Path
@@ -49,6 +50,14 @@ class FxApp : Application() {
         val regionsOfInterests = deskewedImage.regionsOfInterest(numberCandidates)
         val digits = digitClassifier.classify(regionsOfInterests.map { it.first })
         val boundedDigits = digits.zip(regionsOfInterests) { digit, imageAndRect -> Pair(digit, imageAndRect.second) }
+        val positionedDigits = digits.zip(positionedCandidates) { digit, position ->
+            PositionedDigit(
+                position.column,
+                position.row,
+                digit
+            )
+        }
+        File("build/grid.json").writeText(toGrid(gridSize(horizontalLines, verticalLines), positionedDigits))
 
         val numbersImage = cleanedUpDeskewed.black().drawContours(numberCandidates, PURPLE)
         val horizontalLinesImage = numbersImage.withLines(horizontalLines)
@@ -57,7 +66,6 @@ class FxApp : Application() {
         val redrawnGrid = deskewedImage.redrawGrid(boundedDigits, horizontalLines, verticalLines)
         initView(original, deskewedImage, gridWithCoordinates, redrawnGrid)
     }
-
 
     private fun Mat.redrawGrid(
         digits: List<Pair<String, Rect>>,
@@ -139,6 +147,7 @@ private fun Mat.copy(): Mat {
 }
 
 data class PositionedRectangle(val column: Int, val row: Int, val rectangle: Rect)
+data class PositionedDigit(val column: Int, val row: Int, val digit: String)
 
 fun column(rectangle: Rect, verticalLines: List<Pair<Point, Point>>): Int {
     for (i in 0 until verticalLines.size - 1) {
@@ -220,6 +229,40 @@ private fun Mat.toRectangle(trapezoid: MatOfPoint): Mat {
     warpPerspective(this, destination, transform, destination.size())
     return destination
 }
+
+private fun toGrid(gridSize: Pair<Int, Int>, positionedDigits: List<PositionedDigit>) =
+    rows(positionedDigits, gridSize).joinToString(prefix = "[\n", postfix = "\n]", separator = ",\n")
+
+fun rows(positionedDigits: List<PositionedDigit>, gridSize: Pair<Int, Int>) = (0 until gridSize.second)
+    .map {
+        cells(gridSize.first, positionedDigits, it).joinToString(
+            prefix = "  [\n",
+            postfix = "\n  ]",
+            separator = ",\n"
+        )
+    }
+
+fun cells(numberOfColumns: Int, positionedDigits: List<PositionedDigit>, rowIndex: Int): List<String> =
+    (0 until numberOfColumns)
+        .map { """
+            |    {
+            |      "state": "unknown",
+            |      "hint": "${hint(positionedDigits, rowIndex, it)}",
+            |      "help": "foo"
+            |    }""".trimMargin()
+        }
+
+fun hint(positionedDigits: List<PositionedDigit>, rowIndex: Int, columnIndex: Int) = positionedDigits
+    .find { it.column == columnIndex && it.row == rowIndex }
+    ?.digit.dropQuestion()
+    ?: ""
+
+private fun String?.dropQuestion() =
+    if (this != null && endsWith("?")) dropLast(1)
+    else this
+
+private fun gridSize(horizontalLines: List<Pair<Point, Point>>, verticalLines: List<Pair<Point, Point>>) =
+    Pair(verticalLines.size - 1, horizontalLines.size - 1)
 
 private fun Mat.horizontalLines(): List<Pair<Point, Point>> {
     val minWidth = (cols() / 25).toDouble()
